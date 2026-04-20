@@ -118,7 +118,6 @@ func cmdInit() {
 
 	addToGitignore(ciDir + "/")
 	writeClaudeSettings()
-	installHook()
 
 	fmt.Println()
 	fmt.Println("Initialized. Next:")
@@ -305,64 +304,37 @@ func addToGitignore(entry string) {
 }
 
 func writeClaudeSettings() {
-	const path = ".claude/settings.json"
+	const path = ".mcp.json"
 
-	var settings map[string]any
+	var mcp map[string]any
 	if data, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(data, &settings) //nolint
+		json.Unmarshal(data, &mcp) //nolint
 	}
-	if settings == nil {
-		settings = map[string]any{}
+	if mcp == nil {
+		mcp = map[string]any{}
 	}
 
-	mcpServers, _ := settings["mcpServers"].(map[string]any)
+	mcpServers, _ := mcp["mcpServers"].(map[string]any)
 	if mcpServers == nil {
 		mcpServers = map[string]any{}
 	}
-	// Resolve full binary path so Claude Code finds it regardless of PATH.
+
 	bin, err := exec.LookPath("codeindex")
 	if err != nil {
-		bin = "codeindex" // fallback
+		bin = "codeindex"
 	}
 	mcpServers["codeindex"] = map[string]any{
 		"command": bin,
 		"args":    []string{"mcp"},
 	}
-	settings["mcpServers"] = mcpServers
+	mcp["mcpServers"] = mcpServers
 
-	os.MkdirAll(".claude", 0755) //nolint
-	data, _ := json.MarshalIndent(settings, "", "  ")
+	data, _ := json.MarshalIndent(mcp, "", "  ")
 	if err := os.WriteFile(path, data, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "warn: could not write .claude/settings.json: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warn: could not write .mcp.json: %v\n", err)
 		return
 	}
-	fmt.Println("Updated .claude/settings.json — MCP server registered")
-}
-
-func installHook() {
-	const hookPath = ".git/hooks/pre-commit"
-	bin, _ := exec.LookPath("codeindex")
-	if bin == "" {
-		bin = "codeindex"
-	}
-	hookBody := "#!/bin/sh\n" + bin + " index .\n"
-
-	if _, err := os.Stat(".git"); os.IsNotExist(err) {
-		fmt.Println("No .git directory — skipping pre-commit hook")
-		return
-	}
-	if err := os.MkdirAll(".git/hooks", 0755); err != nil {
-		return
-	}
-	if _, err := os.Stat(hookPath); err == nil {
-		fmt.Println("pre-commit hook already exists — skipping")
-		return
-	}
-	if err := os.WriteFile(hookPath, []byte(hookBody), 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "warn: could not install pre-commit hook: %v\n", err)
-		return
-	}
-	fmt.Println("Installed pre-commit hook →", hookPath)
+	fmt.Println("Updated .mcp.json — MCP server registered")
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
