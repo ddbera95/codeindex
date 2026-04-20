@@ -118,6 +118,18 @@ func (s *Server) dispatch(req request) {
 			"protocolVersion": "2024-11-05",
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "codeindex", "version": "1.0.0"},
+			"instructions": "This project uses codeindex for Go code navigation. " +
+				"ALWAYS prefer codeindex tools over reading files or grep. Rules:\n" +
+				"- find_symbol: locate any Go definition — never open files just to find where something is defined.\n" +
+				"- find_usages: trace all call sites — never grep for function names.\n" +
+				"- search_symbols: discover types/functions by name pattern.\n" +
+				"- calls_from: understand what a function depends on.\n" +
+				"- full_text_search: search comments, error strings, TODOs, string literals.\n" +
+				"- get_stats: check index freshness before starting a task.\n" +
+				"- rebuild_index: call after significant code changes to keep symbol data accurate.\n" +
+				"- update_fts: call after adding a new FTS pattern via update_config.\n" +
+				"FTS updates automatically on file save. Symbol index needs rebuild_index after code changes. " +
+				"Only read source files when you need the full implementation body.",
 		})
 	case "notifications/initialized", "notifications/cancelled":
 		// no response for notifications
