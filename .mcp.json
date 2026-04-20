@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "codeindex": {
-      "command": "/home/dhaval/go/bin/codeindex",
-      "args": ["mcp"]
-    }
-  }
-}
