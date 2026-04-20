@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"codeindex/config"
-	"codeindex/indexer"
-	"codeindex/mcp"
-	"codeindex/store"
+	"github.com/ddbera95/codeindex/config"
+	"github.com/ddbera95/codeindex/indexer"
+	"github.com/ddbera95/codeindex/mcp"
+	"github.com/ddbera95/codeindex/store"
 )
 
 const (

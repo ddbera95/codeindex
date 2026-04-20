@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"codeindex/indexer"
+	"github.com/ddbera95/codeindex/indexer"
 
 	bolt "go.etcd.io/bbolt"
 )

@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"codeindex/config"
-	"codeindex/indexer"
-	"codeindex/store"
+	"github.com/ddbera95/codeindex/config"
+	"github.com/ddbera95/codeindex/indexer"
+	"github.com/ddbera95/codeindex/store"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -540,7 +540,7 @@ func toolList() []toolDef {
 			},
 		},
 		{
-			Name: "search_symbols",
+			Name:        "search_symbols",
 			Description: "Search Go symbols by name pattern (case-insensitive substring). Optionally filter by kind. Returns definitions with signatures.",
 			InputSchema: inputSchema{
 				Type: "object",
@@ -567,7 +567,7 @@ func toolList() []toolDef {
 			},
 		},
 		{
-			Name: "calls_from",
+			Name:        "calls_from",
 			Description: "Show all function/method calls made inside a specific function. Use to trace call graphs and understand dependencies.",
 			InputSchema: inputSchema{
 				Type:       "object",

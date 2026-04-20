@@ -1,4 +1,4 @@
-module codeindex
+module github.com/ddbera95/codeindex
 
 go 1.25.0
 
