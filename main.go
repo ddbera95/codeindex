@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/ddbera95/codeindex/config"
@@ -318,10 +319,14 @@ func writeClaudeSettings() {
 	if mcpServers == nil {
 		mcpServers = map[string]any{}
 	}
+	// Resolve full binary path so Claude Code finds it regardless of PATH.
+	bin, err := exec.LookPath("codeindex")
+	if err != nil {
+		bin = "codeindex" // fallback
+	}
 	mcpServers["codeindex"] = map[string]any{
-		"command": "codeindex",
+		"command": bin,
 		"args":    []string{"mcp"},
-		"type":    "stdio",
 	}
 	settings["mcpServers"] = mcpServers
 
@@ -336,7 +341,11 @@ func writeClaudeSettings() {
 
 func installHook() {
 	const hookPath = ".git/hooks/pre-commit"
-	const hookBody = "#!/bin/sh\ncodeindex index .\n"
+	bin, _ := exec.LookPath("codeindex")
+	if bin == "" {
+		bin = "codeindex"
+	}
+	hookBody := "#!/bin/sh\n" + bin + " index .\n"
 
 	if _, err := os.Stat(".git"); os.IsNotExist(err) {
 		fmt.Println("No .git directory — skipping pre-commit hook")
