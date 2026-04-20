@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ddbera95/codeindex/config"
@@ -62,15 +63,17 @@ type mcpContent struct {
 
 // Server is the MCP stdio server for codeindex.
 type Server struct {
-	bolt *store.BoltStore
-	fts  *store.FTSStore
-	cfg  *config.Config
-	mu   sync.Mutex
-	enc  *json.Encoder
+	bolt          *store.BoltStore
+	fts           *store.FTSStore
+	cfg           *config.Config
+	boltPath      string
+	mu            sync.Mutex
+	enc           *json.Encoder
+	reloadPending atomic.Bool // set by watcher when index.bolt.new appears
 }
 
-func New(bolt *store.BoltStore, fts *store.FTSStore, cfg *config.Config) *Server {
-	return &Server{bolt: bolt, fts: fts, cfg: cfg, enc: json.NewEncoder(os.Stdout)}
+func New(bolt *store.BoltStore, fts *store.FTSStore, cfg *config.Config, boltPath string) *Server {
+	return &Server{bolt: bolt, fts: fts, cfg: cfg, boltPath: boltPath, enc: json.NewEncoder(os.Stdout)}
 }
 
 func (s *Server) Run() error {
@@ -112,6 +115,20 @@ func (s *Server) text(t string) map[string]any {
 }
 
 func (s *Server) dispatch(req request) {
+	// Hot-reload: pick up a full rebuild written by `codeindex index` while we were running.
+	if s.reloadPending.Load() {
+		s.reloadPending.Store(false)
+		staging := s.boltPath + ".new"
+		if err := s.bolt.Close(); err == nil {
+			if err := os.Rename(staging, s.boltPath); err == nil {
+				if b, err := store.NewBoltStore(s.boltPath); err == nil {
+					s.bolt = b
+					fmt.Fprintln(os.Stderr, "codeindex sym: hot-reloaded from full rebuild")
+				}
+			}
+		}
+	}
+
 	switch req.Method {
 	case "initialize":
 		s.reply(req.ID, map[string]any{
@@ -546,6 +563,10 @@ func (s *Server) watchFiles(dir string) {
 			isGo := strings.HasSuffix(ev.Name, ".go")
 			if isGo || s.cfg.MatchesFTS(ev.Name) {
 				queue[ev.Name] = pending{ev.Op}
+			}
+			// Detect staging file written by `codeindex index` while MCP is running.
+			if strings.HasSuffix(ev.Name, ".bolt.new") && ev.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+				s.reloadPending.Store(true)
 			}
 			// Watch newly created subdirectories.
 			if ev.Op&fsnotify.Create != 0 {

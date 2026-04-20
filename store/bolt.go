@@ -49,7 +49,7 @@ type BoltStore struct {
 }
 
 func NewBoltStore(path string) (*BoltStore, error) {
-	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 2 * time.Second})
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	if err != nil {
 		return nil, fmt.Errorf("open bolt db: %w", err)
 	}
@@ -552,7 +552,7 @@ func insertFileTx(tx *bolt.Tx, path string, mtime int64, syms []indexer.Symbol, 
 		}
 		existing = append(existing, sym)
 		data, _ := json.Marshal(existing)
-		symName.Put(nameKey, data)           //nolint
+		symName.Put(nameKey, data)                         //nolint
 		symKind.Put([]byte(sym.Kind+"\x00"+name), nameKey) //nolint
 	}
 	symNames := make([]string, 0, len(symNameSet))

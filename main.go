@@ -137,7 +137,7 @@ func cmdMCP() {
 	fatal(err)
 	defer fts.Close()
 
-	srv := mcp.New(bolt, fts, cfg)
+	srv := mcp.New(bolt, fts, cfg, dbPath())
 	if err := srv.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp error:", err)
 		os.Exit(1)
@@ -149,10 +149,20 @@ func cmdIndex(dir string) {
 	idx, err := indexer.IndexDir(dir)
 	fatal(err)
 
-	s, err := store.NewBoltStore(dbPath())
-	fatal(err)
-	defer s.Close()
-	fatal(s.Save(idx))
+	// Try to open the main DB directly. If it succeeds, MCP server is not running.
+	// If it times out, MCP holds the lock — write to staging for hot reload instead.
+	if s, err := store.NewBoltStore(dbPath()); err == nil {
+		fatal(s.Save(idx))
+		s.Close()
+	} else {
+		// MCP server is running — write to staging; watcher will hot-reload it.
+		staging := dbPath() + ".new"
+		s2, err2 := store.NewBoltStore(staging)
+		fatal(err2)
+		fatal(s2.Save(idx))
+		s2.Close()
+		fmt.Println("note: MCP server is running — symbol index will reload on next tool call")
+	}
 	fmt.Printf("symbols: %d | refs: %d | files: %d\n", len(idx.Symbols), len(idx.References), idx.FileCount)
 
 	fts, err := store.NewFTSStore(ftsPath())
