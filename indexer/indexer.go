@@ -132,6 +132,39 @@ type goFile struct {
 	pkg  string
 }
 
+// IndexFile parses a single Go file and returns its symbols and refs.
+// knownVC maps var/const names to their kind from the existing index.
+// Pass nil if no prior index exists.
+func IndexFile(path string, knownVC map[string]string) ([]Symbol, []Reference, error) {
+	ix, err := newIndexer()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer ix.close()
+
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	f := goFile{path: path, src: src, pkg: ix.packageName(src)}
+	syms := ix.extractSymbols(f)
+
+	// Merge this file's new var/const into knownVC so self-references resolve.
+	merged := make(map[string]string, len(knownVC)+len(syms))
+	for k, v := range knownVC {
+		merged[k] = v
+	}
+	for _, s := range syms {
+		if s.Kind == "var" || s.Kind == "const" {
+			merged[s.Name] = s.Kind
+		}
+	}
+
+	refs := ix.extractRefs(f, merged)
+	return syms, refs, nil
+}
+
 func IndexDir(dir string) (*Index, error) {
 	ix, err := newIndexer()
 	if err != nil {

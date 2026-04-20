@@ -126,9 +126,10 @@ func (s *Server) dispatch(req request) {
 				"- calls_from: understand what a function depends on.\n" +
 				"- full_text_search: search comments, error strings, TODOs, string literals.\n" +
 				"- get_stats: check index freshness before starting a task.\n" +
-				"- rebuild_index: call after significant code changes to keep symbol data accurate.\n" +
+				"- rebuild_index: full rebuild — only needed after very large refactors.\n" +
 				"- update_fts: call after adding a new FTS pattern via update_config.\n" +
-				"FTS updates automatically on file save. Symbol index needs rebuild_index after code changes. " +
+				"Both symbol index and FTS update automatically on every file save (incremental). " +
+				"Only call rebuild_index after large refactors or if data looks stale. " +
 				"Only read source files when you need the full implementation body.",
 		})
 	case "notifications/initialized", "notifications/cancelled":
@@ -461,7 +462,29 @@ func (s *Server) toolGetStats(id any) {
 	s.reply(id, s.text(sb.String()))
 }
 
-// ── File watcher ──────────────────────────────────────────────────────────
+// ── File watcher ─────────────────────────────────────────────────────────
+
+func (s *Server) incrementalSymbolUpdate(path string) {
+	knownVC, err := s.bolt.GetKnownVC()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "codeindex sym: GetKnownVC error:", err)
+		return
+	}
+	syms, refs, err := indexer.IndexFile(path, knownVC)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "codeindex sym: parse error", path, err)
+		return
+	}
+	var mtime int64
+	if info, err := os.Stat(path); err == nil {
+		mtime = info.ModTime().Unix()
+	}
+	if err := s.bolt.UpdateFile(path, mtime, syms, refs); err != nil {
+		fmt.Fprintln(os.Stderr, "codeindex sym: save error", path, err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "codeindex sym: updated %s (%d syms, %d refs)\n", path, len(syms), len(refs))
+}
 
 func (s *Server) watchFiles(dir string) {
 	watcher, err := fsnotify.NewWatcher()
@@ -493,7 +516,8 @@ func (s *Server) watchFiles(dir string) {
 			if !ok {
 				return
 			}
-			if s.cfg.MatchesFTS(ev.Name) {
+			isGo := strings.HasSuffix(ev.Name, ".go")
+			if isGo || s.cfg.MatchesFTS(ev.Name) {
 				queue[ev.Name] = pending{ev.Op}
 			}
 			// Watch newly created subdirectories.
@@ -505,15 +529,28 @@ func (s *Server) watchFiles(dir string) {
 		case <-ticker.C:
 			for path, p := range queue {
 				delete(queue, path)
+				isGo := strings.HasSuffix(path, ".go")
 				if p.op&(fsnotify.Remove|fsnotify.Rename) != 0 {
-					if err := s.fts.RemoveFile(path); err == nil {
-						fmt.Fprintln(os.Stderr, "codeindex fts: removed", path)
+					if isGo {
+						if err := s.bolt.RemoveFile(path); err == nil {
+							fmt.Fprintln(os.Stderr, "codeindex sym: removed", path)
+						}
+					}
+					if s.cfg.MatchesFTS(path) {
+						if err := s.fts.RemoveFile(path); err == nil {
+							fmt.Fprintln(os.Stderr, "codeindex fts: removed", path)
+						}
 					}
 				} else {
-					if err := s.fts.IndexFile(path); err != nil {
-						fmt.Fprintln(os.Stderr, "codeindex fts: error indexing", path, err)
-					} else {
-						fmt.Fprintln(os.Stderr, "codeindex fts: updated", path)
+					if isGo {
+						s.incrementalSymbolUpdate(path)
+					}
+					if s.cfg.MatchesFTS(path) {
+						if err := s.fts.IndexFile(path); err != nil {
+							fmt.Fprintln(os.Stderr, "codeindex fts: error", path, err)
+						} else {
+							fmt.Fprintln(os.Stderr, "codeindex fts: updated", path)
+						}
 					}
 				}
 			}
@@ -620,9 +657,9 @@ func toolList() []toolDef {
 		},
 		{
 			Name: "rebuild_index",
-			Description: "Rebuild the full symbol index (find_symbol, find_usages, calls_from, search_symbols). " +
-				"Runs tree-sitter parsing across all Go files — use after significant code changes. " +
-				"The FTS index is separate and updated automatically by the file watcher or via update_fts.",
+			Description: "Rebuild the full symbol index from scratch (find_symbol, find_usages, calls_from, search_symbols). " +
+				"The file watcher handles incremental updates automatically on save. " +
+				"Use this only after very large refactors or if the index seems stale.",
 			InputSchema: inputSchema{Type: "object", Properties: map[string]property{}},
 		},
 		{
