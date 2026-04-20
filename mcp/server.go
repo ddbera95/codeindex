@@ -465,6 +465,12 @@ func (s *Server) toolGetStats(id any) {
 // ── File watcher ─────────────────────────────────────────────────────────
 
 func (s *Server) incrementalSymbolUpdate(path string) {
+	// Find which files reference this file's symbols BEFORE we update,
+	// so we can cascade re-index them after (cross-file ref accuracy).
+	oldSymNames, _ := s.bolt.GetFileSymNames(path)
+	affected, _ := s.bolt.FilesReferencingSymbols(oldSymNames)
+
+	// Update the changed file.
 	knownVC, err := s.bolt.GetKnownVC()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "codeindex sym: GetKnownVC error:", err)
@@ -484,6 +490,27 @@ func (s *Server) incrementalSymbolUpdate(path string) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "codeindex sym: updated %s (%d syms, %d refs)\n", path, len(syms), len(refs))
+
+	// Cascade: re-index files that referenced the old symbols so their refs stay accurate.
+	for _, dep := range affected {
+		if dep == path {
+			continue
+		}
+		knownVC, _ := s.bolt.GetKnownVC()
+		dSyms, dRefs, err := indexer.IndexFile(dep, knownVC)
+		if err != nil {
+			continue // file may have been deleted
+		}
+		var dMtime int64
+		if info, err := os.Stat(dep); err == nil {
+			dMtime = info.ModTime().Unix()
+		}
+		if err := s.bolt.UpdateFile(dep, dMtime, dSyms, dRefs); err != nil {
+			fmt.Fprintln(os.Stderr, "codeindex sym: cascade save error", dep, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "codeindex sym: cascade updated %s\n", dep)
+	}
 }
 
 func (s *Server) watchFiles(dir string) {
@@ -532,8 +559,28 @@ func (s *Server) watchFiles(dir string) {
 				isGo := strings.HasSuffix(path, ".go")
 				if p.op&(fsnotify.Remove|fsnotify.Rename) != 0 {
 					if isGo {
+						// Capture affected files before removal for cascade re-index.
+						oldSymNames, _ := s.bolt.GetFileSymNames(path)
+						affected, _ := s.bolt.FilesReferencingSymbols(oldSymNames)
+
 						if err := s.bolt.RemoveFile(path); err == nil {
 							fmt.Fprintln(os.Stderr, "codeindex sym: removed", path)
+						}
+						for _, dep := range affected {
+							if dep == path {
+								continue
+							}
+							knownVC, _ := s.bolt.GetKnownVC()
+							dSyms, dRefs, err := indexer.IndexFile(dep, knownVC)
+							if err != nil {
+								continue
+							}
+							var dMtime int64
+							if info, err := os.Stat(dep); err == nil {
+								dMtime = info.ModTime().Unix()
+							}
+							s.bolt.UpdateFile(dep, dMtime, dSyms, dRefs) //nolint
+							fmt.Fprintln(os.Stderr, "codeindex sym: cascade updated", dep)
 						}
 					}
 					if s.cfg.MatchesFTS(path) {

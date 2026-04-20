@@ -300,6 +300,54 @@ func (s *BoltStore) Stats() (Meta, error) {
 
 // ── Incremental file updates ───────────────────────────────────────────────
 
+// GetFileSymNames returns the symbol names that path currently contributes to the index.
+func (s *BoltStore) GetFileSymNames(path string) ([]string, error) {
+	var names []string
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bFileSym)
+		if b == nil {
+			return nil
+		}
+		v := b.Get([]byte(path))
+		if v == nil {
+			return nil
+		}
+		return json.Unmarshal(v, &names)
+	})
+	return names, err
+}
+
+// FilesReferencingSymbols returns the unique file paths that reference any of the given symbol names.
+// Used to find which files need re-indexing after a symbol is renamed or removed.
+func (s *BoltStore) FilesReferencingSymbols(symNames []string) ([]string, error) {
+	seen := map[string]bool{}
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bRefSym)
+		if b == nil {
+			return nil
+		}
+		for _, name := range symNames {
+			v := b.Get([]byte(name))
+			if v == nil {
+				continue
+			}
+			var refs []indexer.Reference
+			if err := json.Unmarshal(v, &refs); err != nil {
+				continue
+			}
+			for _, r := range refs {
+				seen[r.File] = true
+			}
+		}
+		return nil
+	})
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	return out, err
+}
+
 // GetKnownVC returns all var/const names from the index for incremental parsing.
 func (s *BoltStore) GetKnownVC() (map[string]string, error) {
 	out := map[string]string{}
